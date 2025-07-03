@@ -13,6 +13,12 @@ credentials:
       password: '$2b$12$v3vcLNy2A5fsJRreQ/YNpePUuE/LPdjBk73Bv8qvJ3zhD/q3HeM5S'
       subscription_valid_until: '2025-07-31'
 
+    demo_test_user:
+      email: 'email@gmail.com'
+      name: 'test_user'
+      password: '&mWbD308_:'
+      subscription_valid_until: '2025-07-15'
+
 cookie:
   
   expiry_days: 30
