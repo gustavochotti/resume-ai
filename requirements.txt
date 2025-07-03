@@ -1,0 +1,8 @@
+streamlit
+google-generativeai
+PyMuPDF
+youtube-transcript-api
+newspaper3k
+lxml[html_clean]
+streamlit-authenticator
+PyYAML
