@@ -67,7 +67,7 @@ if st.session_state.get("authentication_status"):
             prompt_analise_estruturada = f"Analise o seguinte texto e extraia os seguintes componentes em formato de tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
             prompt_gerar_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas para testar o entendimento profundo do conteúdo:\n\nTexto:\n{_texto}"
             resultados = {}
-            with st.spinner("Resume isso está trabalhando... (Isso pode levar um momento)"):
+            with st.spinner("Resume ai está trabalhando... (Isso pode levar um momento)"):
                 resposta_resumo = model.generate_content(prompt_resumo_simples)
                 resposta_analise = model.generate_content(prompt_analise_estruturada)
                 resposta_perguntas = model.generate_content(prompt_gerar_perguntas)
@@ -138,7 +138,7 @@ if st.session_state.get("authentication_status"):
                 st.session_state.analise_estatica = analisar_texto_com_gemini(st.session_state.texto_analisado)
             if "chat_doc" not in st.session_state:
                 prompt_inicial_chat = f"Você é um especialista no documento a seguir...\n\nO texto é:\n---\n{st.session_state.texto_analisado}\n---"
-                model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=prompt_inicial_chat)
+                model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=prompt_inicial_chat)
                 st.session_state.chat_doc = model.start_chat(history=[])
                 st.session_state.chat_messages = []
             lista_de_abas = ["Análise Inicial", "Conversar com o Documento"]
@@ -193,4 +193,4 @@ if st.session_state.get("authentication_status"):
 elif st.session_state.get("authentication_status") is False:
     st.error('Usuário ou senha incorreta')
 elif st.session_state.get("authentication_status") is None:
-    st.warning('Por favor, insira seu usuário e senha para acessar o Destilador de Conhecimento.')
+    st.warning('Por favor, insira seu usuário e senha para acessar o Resume Ai.')
