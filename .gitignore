@@ -1,0 +1,6 @@
+# Ignorar a pasta do ambiente virtual
+venv/
+__pycache__/
+
+# Ignorar o arquivo de segredos local
+.streamlit/secrets.toml
