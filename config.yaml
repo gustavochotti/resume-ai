@@ -16,7 +16,7 @@ credentials:
     demo_test_user:
       email: 'email@gmail.com'
       name: 'test_user'
-      password: '&mWbD308_:'
+      password: '$2b$12$I7LQRuLM6NjoSr2wXBCWUOSCHjApel0t6DdGtTU0b1492Y/HSweO2'
       subscription_valid_until: '2025-07-15'
 
 cookie:
