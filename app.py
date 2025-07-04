@@ -57,12 +57,19 @@ if st.session_state.get("authentication_status"):
             authenticator.logout('Logout', 'main')
 
         # --- FUNÇÕES DE BACKEND DO APP ---
+        try:
+            GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+            genai.configure(api_key=GEMINI_API_KEY)
+        except Exception as e:
+            st.error(f"Erro ao configurar a API do Gemini. Verifique sua chave em st.secrets. Erro: {e}")
+            st.stop()
+            
         @st.cache_data(show_spinner=False)
         def analisar_texto_com_gemini(_texto):
             if not _texto or len(_texto) < 100:
                 st.warning("O texto extraído é muito curto para uma análise significativa.")
                 return None
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash') # Modelo corrigido
             prompt_resumo_simples = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
             prompt_analise_estruturada = f"Analise o seguinte texto e extraia os seguintes componentes em formato de tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
             prompt_gerar_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas para testar o entendimento profundo do conteúdo:\n\nTexto:\n{_texto}"
@@ -87,63 +94,79 @@ if st.session_state.get("authentication_status"):
                 key="fonte_selecao",
                 index=0
             )
-            texto_extraido = None
-            if fonte_selecionada != "Vídeo (YouTube)":
-                st.session_state.pop("video_url", None)
+            
             if fonte_selecionada == "Documento (PDF)":
-                st.subheader("Analisador de Documentos (PDF)")
-                uploaded_file = st.file_uploader("Escolha um arquivo PDF", type="pdf", label_visibility="collapsed")
-                if uploaded_file:
-                    with st.spinner("Extraindo texto do PDF..."):
-                        texto_bytes = uploaded_file.read()
-                        with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
-                            texto_extraido = "".join(page.get_text() for page in doc)
+                pagina_analise_pdf()
             elif fonte_selecionada == "Vídeo (YouTube)":
-                st.error("""
-                **Aviso Importante sobre a Análise de Vídeos**
-
-                Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma que bloqueiam servidores em nuvem. Para garantir sua análise, recomendamos a seguinte alternativa:
-
-                1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetotranscript.com).
-                2.  **Salve como PDF:** Copie o texto e salve-o como um arquivo PDF.
-                3.  **Analise o PDF:** Selecione a opção **"Documento (PDF)"** no menu e faça o upload do arquivo.
-
-                Nossa IA fará a análise completa para você a partir do seu documento.
-                         
-                Pedimos desculpas pelo transtorno!
-                """)
-
-                st.write("Se ainda assim desejar tentar a extração automática, cole a URL abaixo:")
-
-                st.subheader("Analisador de Vídeos do YouTube")
-                url_video = st.text_input("Cole a URL do vídeo do YouTube:")
-                if url_video:
-                    st.session_state.video_url = url_video 
-                    with st.spinner("Buscando a transcrição do vídeo..."):
-                        try:
-                            video_id = None
-                            if "v=" in url_video: video_id = url_video.split("v=")[1].split("&")[0]
-                            elif "youtu.be/" in url_video: video_id = url_video.split("youtu.be/")[1].split("?")[0]
-                            if video_id:
-                                transcricao_lista = YouTubeTranscriptApi.get_transcript(video_id, languages=['pt', 'en'])
-                                texto_extraido = " ".join([item['text'] for item in transcricao_lista])
-                            else: st.error("URL do YouTube inválida.")
-                        except Exception as e: st.error(f"Não foi possível obter a transcrição. Erro: {e}")
+                pagina_analise_youtube()
             elif fonte_selecionada == "Artigo da Web":
-                st.subheader("Analisador de Artigos da Web")
-                url_artigo = st.text_input("Cole a URL do artigo:")
-                if url_artigo:
-                    with st.spinner("Lendo o artigo da web..."):
-                        try:
-                            article = Article(url_artigo)
-                            article.download()
-                            article.parse()
-                            texto_extraido = article.text
-                        except Exception as e: st.error(f"Não foi possível processar o artigo. Erro: {e}")
-            if texto_extraido:
-                st.session_state.texto_analisado = texto_extraido
-                st.session_state.pagina_atual = "Resultados"
-                st.rerun()
+                pagina_analise_web()
+
+        def pagina_analise_pdf():
+            st.subheader("Analisador de Documentos (PDF)")
+            uploaded_file = st.file_uploader("Escolha um arquivo PDF", type="pdf", label_visibility="collapsed")
+            if uploaded_file:
+                with st.spinner("Extraindo texto do PDF..."):
+                    texto_bytes = uploaded_file.read()
+                    with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
+                        texto_extraido = "".join(page.get_text() for page in doc)
+                if texto_extraido:
+                    st.session_state.texto_analisado = texto_extraido
+                    st.session_state.pagina_atual = "Resultados"
+                    st.rerun()
+
+        def pagina_analise_youtube():
+            st.subheader("Analisador de Vídeos do YouTube")
+
+            # --- MENSAGEM DE AVISO ADICIONADA AQUI ---
+            st.error("""
+            **Aviso Importante sobre a Análise de Vídeos**
+
+            Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma que bloqueiam servidores em nuvem. Para garantir sua análise, recomendamos a seguinte alternativa:
+
+            1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetranscript.com/).
+            2.  **Salve como PDF:** Copie o texto e salve-o como um arquivo PDF.
+            3.  **Analise o PDF:** Selecione a opção **"Documento (PDF)"** no menu ao lado e faça o upload do arquivo.
+
+            Nossa IA fará a análise completa para você a partir do seu documento.
+            """)
+            
+            st.write("Se ainda assim desejar tentar a extração automática (pode funcionar em ambiente local), cole a URL abaixo:")
+            url_video = st.text_input("Cole a URL do vídeo do YouTube:")
+            if url_video:
+                st.session_state.video_url = url_video 
+                with st.spinner("Buscando a transcrição do vídeo..."):
+                    try:
+                        video_id = None
+                        if "v=" in url_video: video_id = url_video.split("v=")[1].split("&")[0]
+                        elif "youtu.be/" in url_video: video_id = url_video.split("youtu.be/")[1].split("?")[0]
+                        if video_id:
+                            transcricao_lista = YouTubeTranscriptApi.get_transcript(video_id, languages=['pt', 'en'])
+                            texto_extraido = " ".join([item['text'] for item in transcricao_lista])
+                            if texto_extraido:
+                                st.session_state.texto_analisado = texto_extraido
+                                st.session_state.pagina_atual = "Resultados"
+                                st.rerun()
+                        else:
+                            st.error("URL do YouTube inválida.")
+                    except Exception as e:
+                        st.error(f"Não foi possível obter a transcrição. Erro: {e}")
+        
+        def pagina_analise_web():
+            st.subheader("Analisador de Artigos da Web")
+            url_artigo = st.text_input("Cole a URL do artigo:")
+            if url_artigo:
+                with st.spinner("Lendo o artigo da web..."):
+                    try:
+                        article = Article(url_artigo)
+                        article.download()
+                        article.parse()
+                        texto_extraido = article.text
+                        if texto_extraido:
+                            st.session_state.texto_analisado = texto_extraido
+                            st.session_state.pagina_atual = "Resultados"
+                            st.rerun()
+                    except Exception as e: st.error(f"Não foi possível processar o artigo. Erro: {e}")
 
         def pagina_resultados_e_chat():
             st.title("Resultados da Análise")
