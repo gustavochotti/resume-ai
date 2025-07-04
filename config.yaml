@@ -13,7 +13,7 @@ credentials:
       password: '$2b$12$v3vcLNy2A5fsJRreQ/YNpePUuE/LPdjBk73Bv8qvJ3zhD/q3HeM5S'
       subscription_valid_until: '2025-07-31'
 
-    demo_test_user:
+    demo_test_user_1:
       email: 'email@gmail.com'
       name: 'test_user'
       password: '$2b$12$I7LQRuLM6NjoSr2wXBCWUOSCHjApel0t6DdGtTU0b1492Y/HSweO2'
