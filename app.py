@@ -122,6 +122,8 @@ if st.session_state.get("authentication_status"):
             3.  **Analise o PDF:** Selecione a opção **"Documento (PDF)"** no menu ao lado e faça o upload do arquivo.
 
             Nossa IA fará a análise completa para você a partir do seu documento.
+
+            Pedimos desculpas pelo transtorno!
             """)
                 st.write("Se ainda assim desejar tentar a extração automática, cole a URL abaixo:")
                 st.subheader("Analisador de Vídeos do YouTube")
