@@ -2,13 +2,14 @@ import streamlit as st
 import google.generativeai as genai
 import fitz  # PyMuPDF
 from io import BytesIO
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from newspaper import Article
 import time
 import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
 from datetime import date
+from google.api_core import exceptions as google_exceptions # ADICIONADO: Para capturar erros da API do Google
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Resume Ai", page_icon="resume ai", layout="wide")
@@ -34,24 +35,17 @@ authenticator.login()
 if st.session_state.get("authentication_status"):
     # ---- INÍCIO: Bloco de código para usuários logados ----
 
-    # --- LÓGICA DE AUTORIZAÇÃO (VERIFICAÇÃO DE ASSINATURA) ---
     username = st.session_state.get("username")
     user_data = config['credentials']['usernames'].get(username, {})
 
     def verificar_validade_assinatura(details):
-        """Verifica se a data de assinatura do usuário é válida."""
-        if 'subscription_valid_until' not in details:
-            return False
+        if 'subscription_valid_until' not in details: return False
         try:
             data_validade = date.fromisoformat(str(details['subscription_valid_until']))
             return date.today() <= data_validade
-        except (ValueError, TypeError):
-            return False
+        except (ValueError, TypeError): return False
 
-    # Se a assinatura for válida, mostra o app. Senão, mostra mensagem de erro.
     if verificar_validade_assinatura(user_data):
-        
-        # Botão de Logout e mensagem de boas-vindas na barra lateral
         with st.sidebar:
             st.write(f'Bem-vindo(a), *{st.session_state["name"]}*')
             authenticator.logout('Logout', 'main')
@@ -63,25 +57,33 @@ if st.session_state.get("authentication_status"):
         except Exception as e:
             st.error(f"Erro ao configurar a API do Gemini. Verifique sua chave em st.secrets. Erro: {e}")
             st.stop()
-            
+
+        # --- ALTERAÇÃO 1: TRATAMENTO DE ERRO NA FUNÇÃO DO GEMINI ---
         @st.cache_data(show_spinner=False)
         def analisar_texto_com_gemini(_texto):
             if not _texto or len(_texto) < 100:
                 st.warning("O texto extraído é muito curto para uma análise significativa.")
                 return None
-            model = genai.GenerativeModel('gemini-2.5-flash') # Modelo corrigido
-            prompt_resumo_simples = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
-            prompt_analise_estruturada = f"Analise o seguinte texto e extraia os seguintes componentes em formato de tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
-            prompt_gerar_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas para testar o entendimento profundo do conteúdo:\n\nTexto:\n{_texto}"
-            resultados = {}
-            with st.spinner("Resume ai está trabalhando... (Isso pode levar um momento)"):
-                resposta_resumo = model.generate_content(prompt_resumo_simples)
-                resposta_analise = model.generate_content(prompt_analise_estruturada)
-                resposta_perguntas = model.generate_content(prompt_gerar_perguntas)
-                resultados["resumo_simples"] = resposta_resumo.text
-                resultados["analise_estruturada"] = resposta_analise.text
-                resultados["perguntas_criticas"] = resposta_perguntas.text
-            return resultados
+            try:
+                model = genai.GenerativeModel('gemini-2.5-flash') # Nome do modelo corrigido
+                prompt_resumo_simples = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
+                prompt_analise_estruturada = f"Analise o seguinte texto e extraia os seguintes componentes em formato de tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
+                prompt_gerar_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas para testar o entendimento profundo do conteúdo:\n\nTexto:\n{_texto}"
+                resultados = {}
+                with st.spinner("Resume ai está trabalhando... (Isso pode levar um momento)"):
+                    resposta_resumo = model.generate_content(prompt_resumo_simples)
+                    resposta_analise = model.generate_content(prompt_analise_estruturada)
+                    resposta_perguntas = model.generate_content(prompt_gerar_perguntas)
+                    resultados["resumo_simples"] = resposta_resumo.text
+                    resultados["analise_estruturada"] = resposta_analise.text
+                    resultados["perguntas_criticas"] = resposta_perguntas.text
+                return resultados
+            except google_exceptions.ResourceExhausted as e:
+                st.error("Você atingiu o limite de uso da API do Gemini. Por favor, tente novamente mais tarde.")
+                return None
+            except Exception as e:
+                st.error(f"Houve um erro na comunicação com a IA. Tente novamente mais tarde.")
+                return None
 
         # --- LÓGICA DAS PÁGINAS DO APP ---
         def pagina_principal():
@@ -94,81 +96,74 @@ if st.session_state.get("authentication_status"):
                 key="fonte_selecao",
                 index=0
             )
-            
+            texto_extraido = None
             if fonte_selecionada == "Documento (PDF)":
-                pagina_analise_pdf()
+                st.subheader("Analisador de Documentos (PDF)")
+                uploaded_file = st.file_uploader("Escolha um arquivo PDF", type="pdf", label_visibility="collapsed")
+                if uploaded_file:
+                    with st.spinner("Extraindo texto do PDF..."):
+                        try:
+                            texto_bytes = uploaded_file.read()
+                            with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
+                                texto_extraido = "".join(page.get_text() for page in doc)
+                        except Exception:
+                            st.error("Houve um erro ao ler o arquivo PDF. Tente novamente.")
+            
+            # --- INÍCIO DA ALTERAÇÃO 2: TRATAMENTO DE ERRO NA LÓGICA DO YOUTUBE ---
             elif fonte_selecionada == "Vídeo (YouTube)":
-                pagina_analise_youtube()
-            elif fonte_selecionada == "Artigo da Web":
-                pagina_analise_web()
-
-        def pagina_analise_pdf():
-            st.subheader("Analisador de Documentos (PDF)")
-            uploaded_file = st.file_uploader("Escolha um arquivo PDF", type="pdf", label_visibility="collapsed")
-            if uploaded_file:
-                with st.spinner("Extraindo texto do PDF..."):
-                    texto_bytes = uploaded_file.read()
-                    with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
-                        texto_extraido = "".join(page.get_text() for page in doc)
-                if texto_extraido:
-                    st.session_state.texto_analisado = texto_extraido
-                    st.session_state.pagina_atual = "Resultados"
-                    st.rerun()
-
-        def pagina_analise_youtube():
-            st.subheader("Analisador de Vídeos do YouTube")
-
-            # --- MENSAGEM DE AVISO ADICIONADA AQUI ---
-            st.error("""
+                # A mensagem de aviso que você pediu já está aqui, o que é ótimo.
+                st.error("""         
             **Aviso Importante sobre a Análise de Vídeos**
 
             Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma que bloqueiam servidores em nuvem. Para garantir sua análise, recomendamos a seguinte alternativa:
 
-            1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetranscript.com/).
+            1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetotranscript.com).
             2.  **Salve como PDF:** Copie o texto e salve-o como um arquivo PDF.
             3.  **Analise o PDF:** Selecione a opção **"Documento (PDF)"** no menu ao lado e faça o upload do arquivo.
 
             Nossa IA fará a análise completa para você a partir do seu documento.
             """)
+                st.write("Se ainda assim desejar tentar a extração automática, cole a URL abaixo:")
+                st.subheader("Analisador de Vídeos do YouTube")
+                url_video = st.text_input("Cole a URL do vídeo do YouTube:")
+                if url_video:
+                    st.session_state.video_url = url_video 
+                    with st.spinner("Buscando a transcrição do vídeo..."):
+                        try:
+                            video_id = None
+                            if "v=" in url_video: video_id = url_video.split("v=")[1].split("&")[0]
+                            elif "youtu.be/" in url_video: video_id = url_video.split("youtu.be/")[1].split("?")[0]
+                            if video_id:
+                                transcricao_lista = YouTubeTranscriptApi.get_transcript(video_id, languages=['pt', 'en'])
+                                texto_extraido = " ".join([item['text'] for item in transcricao_lista])
+                            else: st.error("URL do YouTube inválida.")
+                        except (TranscriptsDisabled, NoTranscriptFound):
+                            st.error("Não foi possível obter a transcrição. Este vídeo não possui legendas em Português ou Inglês, ou elas estão desativadas.")
+                        except Exception as e:
+                            if 'Too Many Requests' in str(e) or 'blocking requests' in str(e):
+                                st.error("O YouTube bloqueou nosso acesso temporariamente por excesso de requisições. Este é um problema comum em ambientes online. Por favor, utilize o método alternativo de PDF ou tente novamente mais tarde.")
+                            else:
+                                st.error("Houve um erro inesperado ao buscar a transcrição. Tente novamente mais tarde.")
+            # --- FIM DA ALTERAÇÃO 2 ---
             
-            st.write("Se ainda assim desejar tentar a extração automática (pode funcionar em ambiente local), cole a URL abaixo:")
-            url_video = st.text_input("Cole a URL do vídeo do YouTube:")
-            if url_video:
-                st.session_state.video_url = url_video 
-                with st.spinner("Buscando a transcrição do vídeo..."):
-                    try:
-                        video_id = None
-                        if "v=" in url_video: video_id = url_video.split("v=")[1].split("&")[0]
-                        elif "youtu.be/" in url_video: video_id = url_video.split("youtu.be/")[1].split("?")[0]
-                        if video_id:
-                            transcricao_lista = YouTubeTranscriptApi.get_transcript(video_id, languages=['pt', 'en'])
-                            texto_extraido = " ".join([item['text'] for item in transcricao_lista])
-                            if texto_extraido:
-                                st.session_state.texto_analisado = texto_extraido
-                                st.session_state.pagina_atual = "Resultados"
-                                st.rerun()
-                        else:
-                            st.error("URL do YouTube inválida.")
-                    except Exception as e:
-                        st.error(f"Não foi possível obter a transcrição. Erro: {e}")
-        
-        def pagina_analise_web():
-            st.subheader("Analisador de Artigos da Web")
-            url_artigo = st.text_input("Cole a URL do artigo:")
-            if url_artigo:
-                with st.spinner("Lendo o artigo da web..."):
-                    try:
-                        article = Article(url_artigo)
-                        article.download()
-                        article.parse()
-                        texto_extraido = article.text
-                        if texto_extraido:
-                            st.session_state.texto_analisado = texto_extraido
-                            st.session_state.pagina_atual = "Resultados"
-                            st.rerun()
-                    except Exception as e: st.error(f"Não foi possível processar o artigo. Erro: {e}")
+            elif fonte_selecionada == "Artigo da Web":
+                st.subheader("Analisador de Artigos da Web")
+                url_artigo = st.text_input("Cole a URL do artigo:")
+                if url_artigo:
+                    with st.spinner("Lendo o artigo da web..."):
+                        try:
+                            article = Article(url_artigo)
+                            article.download()
+                            article.parse()
+                            texto_extraido = article.text
+                        except Exception: st.error("Não foi possível processar o artigo. Verifique o link e tente novamente.")
+            if texto_extraido:
+                st.session_state.texto_analisado = texto_extraido
+                st.session_state.pagina_atual = "Resultados"
+                st.rerun()
 
         def pagina_resultados_e_chat():
+            # ... (código da página de resultados inalterado)
             st.title("Resultados da Análise")
             if st.sidebar.button("Analisar Outro Conteúdo", use_container_width=True):
                 resetar_estado()
