@@ -99,6 +99,22 @@ if st.session_state.get("authentication_status"):
                         with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
                             texto_extraido = "".join(page.get_text() for page in doc)
             elif fonte_selecionada == "Vídeo (YouTube)":
+                st.error("""
+                **Aviso Importante sobre a Análise de Vídeos**
+
+                Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma que bloqueiam servidores em nuvem. Para garantir sua análise, recomendamos a seguinte alternativa:
+
+                1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetotranscript.com).
+                2.  **Salve como PDF:** Copie o texto e salve-o como um arquivo PDF.
+                3.  **Analise o PDF:** Selecione a opção **"Documento (PDF)"** no menu e faça o upload do arquivo.
+
+                Nossa IA fará a análise completa para você a partir do seu documento.
+                         
+                Pedimos desculpas pelo transtorno!
+                """)
+
+                st.write("Se ainda assim desejar tentar a extração automática, cole a URL abaixo:")
+
                 st.subheader("Analisador de Vídeos do YouTube")
                 url_video = st.text_input("Cole a URL do vídeo do YouTube:")
                 if url_video:
