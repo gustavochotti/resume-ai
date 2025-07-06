@@ -9,7 +9,7 @@ import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
 from datetime import date
-from google.api_core import exceptions as google_exceptions # ADICIONADO: Para capturar erros da API do Google
+from google.api_core import exceptions as google_exceptions
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Resume Ai", page_icon="resume ai", layout="wide")
@@ -58,14 +58,13 @@ if st.session_state.get("authentication_status"):
             st.error(f"Erro ao configurar a API do Gemini. Verifique sua chave em st.secrets. Erro: {e}")
             st.stop()
 
-        # --- ALTERAÇÃO 1: TRATAMENTO DE ERRO NA FUNÇÃO DO GEMINI ---
         @st.cache_data(show_spinner=False)
         def analisar_texto_com_gemini(_texto):
             if not _texto or len(_texto) < 100:
                 st.warning("O texto extraído é muito curto para uma análise significativa.")
                 return None
             try:
-                model = genai.GenerativeModel('gemini-2.5-flash') # Nome do modelo corrigido
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 prompt_resumo_simples = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
                 prompt_analise_estruturada = f"Analise o seguinte texto e extraia os seguintes componentes em formato de tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
                 prompt_gerar_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas para testar o entendimento profundo do conteúdo:\n\nTexto:\n{_texto}"
@@ -90,43 +89,62 @@ if st.session_state.get("authentication_status"):
             st.title("Precisa de ajuda? Eu resumo isso ai para você...")
             st.write("Resume Ai é uma plataforma de IA criada para analisar, resumir e conversar com qualquer conteúdo.")
             st.sidebar.title("Fonte do Conteúdo")
-            fonte_selecionada = st.sidebar.radio(
-                "Selecione o que você quer analisar:",
-                ["Página Inicial", "Documento (PDF)", "Vídeo (YouTube)", "Artigo da Web"],
-                key="fonte_selecao",
-                index=0
-            )
-            texto_extraido = None
-            if fonte_selecionada == "Documento (PDF)":
-                st.subheader("Analisador de Documentos (PDF)")
-                uploaded_file = st.file_uploader("Escolha um arquivo PDF", type="pdf", label_visibility="collapsed")
-                if uploaded_file:
-                    with st.spinner("Extraindo texto do PDF..."):
-                        try:
-                            texto_bytes = uploaded_file.read()
-                            with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
-                                texto_extraido = "".join(page.get_text() for page in doc)
-                        except Exception:
-                            st.error("Houve um erro ao ler o arquivo PDF. Tente novamente.")
             
-            # --- INÍCIO DA ALTERAÇÃO 2: TRATAMENTO DE ERRO NA LÓGICA DO YOUTUBE ---
+            # --- ALTERAÇÃO 1: ADICIONADA NOVA OPÇÃO NO MENU ---
+            opcoes_menu = [
+                "Análise de Fonte Única", 
+                "Chat com Múltiplos Documentos"
+            ]
+            pagina_selecionada = st.sidebar.selectbox("Escolha o modo de análise:", opcoes_menu)
+
+            if pagina_selecionada == "Análise de Fonte Única":
+                pagina_analise_unica()
+            elif pagina_selecionada == "Chat com Múltiplos Documentos":
+                pagina_chat_multiplos_arquivos()
+        
+        def pagina_analise_unica():
+            st.header("Análise de Fonte Única")
+            fonte_selecionada = st.radio(
+                "Selecione o que você quer analisar:",
+                ["Documento (PDF ou TXT)", "Vídeo (YouTube)", "Artigo da Web"],
+                key="fonte_selecao_unica",
+                horizontal=True
+            )
+            
+            texto_extraido = None
+            if fonte_selecionada == "Documento (PDF ou TXT)":
+                # --- ALTERAÇÃO 2: UPLOAD AGORA ACEITA PDF E TXT ---
+                st.subheader("Analisador de Documentos (PDF ou TXT)")
+                uploaded_file = st.file_uploader("Escolha um arquivo PDF ou TXT", type=["pdf", "txt"], label_visibility="collapsed")
+                if uploaded_file:
+                    with st.spinner("Extraindo texto do arquivo..."):
+                        try:
+                            if uploaded_file.type == "application/pdf":
+                                texto_bytes = uploaded_file.read()
+                                with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
+                                    texto_extraido = "".join(page.get_text() for page in doc)
+                            elif uploaded_file.type == "text/plain":
+                                texto_extraido = uploaded_file.read().decode("utf-8")
+                        except Exception as e:
+                            st.error(f"Houve um erro ao ler o arquivo: {e}")
+            
             elif fonte_selecionada == "Vídeo (YouTube)":
-                # A mensagem de aviso que você pediu já está aqui, o que é ótimo.
-                st.error("""         
-            **Aviso Importante sobre a Análise de Vídeos**
+                # ... (código do YouTube inalterado)
+                st.subheader("Analisador de Vídeos do YouTube")
+                st.error("""
+                **Aviso Importante sobre a Análise de Vídeos**
 
             Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma que bloqueiam servidores em nuvem. Para garantir sua análise, recomendamos a seguinte alternativa:
 
             1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetotranscript.com).
-            2.  **Salve como PDF:** Copie o texto e salve-o como um arquivo PDF.
-            3.  **Analise o PDF:** Selecione a opção **"Documento (PDF)"** no menu ao lado e faça o upload do arquivo.
+            2.  **Salve como PDF ou TXT:** Copie o texto e salve-o como um arquivo PDF ou TXT.
+            3.  **Analise o TXT:** Selecione a opção **"Documento (PDF ou TXT)"** no menu Análise de Fonte única ao lado e faça o upload do arquivo.
 
             Nossa IA fará a análise completa para você a partir do seu documento.
 
             Pedimos desculpas pelo transtorno!
             """)
                 st.write("Se ainda assim desejar tentar a extração automática, cole a URL abaixo:")
-                st.subheader("Analisador de Vídeos do YouTube")
                 url_video = st.text_input("Cole a URL do vídeo do YouTube:")
                 if url_video:
                     st.session_state.video_url = url_video 
@@ -140,15 +158,15 @@ if st.session_state.get("authentication_status"):
                                 texto_extraido = " ".join([item['text'] for item in transcricao_lista])
                             else: st.error("URL do YouTube inválida.")
                         except (TranscriptsDisabled, NoTranscriptFound):
-                            st.error("Não foi possível obter a transcrição. Este vídeo não possui legendas em Português ou Inglês, ou elas estão desativadas.")
+                            st.error("Não foi possível obter a transcrição. Este vídeo não possui legendas ou elas estão desativadas.")
                         except Exception as e:
                             if 'Too Many Requests' in str(e) or 'blocking requests' in str(e):
-                                st.error("O YouTube bloqueou nosso acesso temporariamente por excesso de requisições. Este é um problema comum em ambientes online. Por favor, utilize o método alternativo de PDF ou tente novamente mais tarde.")
+                                st.error("O YouTube bloqueou nosso acesso. Por favor, utilize o método alternativo de PDF.")
                             else:
-                                st.error("Houve um erro inesperado ao buscar a transcrição. Tente novamente mais tarde.")
-            # --- FIM DA ALTERAÇÃO 2 ---
+                                st.error("Houve um erro inesperado ao buscar a transcrição.")
             
             elif fonte_selecionada == "Artigo da Web":
+                # ... (código de artigo da web inalterado)
                 st.subheader("Analisador de Artigos da Web")
                 url_artigo = st.text_input("Cole a URL do artigo:")
                 if url_artigo:
@@ -158,16 +176,73 @@ if st.session_state.get("authentication_status"):
                             article.download()
                             article.parse()
                             texto_extraido = article.text
-                        except Exception: st.error("Não foi possível processar o artigo. Verifique o link e tente novamente.")
+                        except Exception as e: st.error(f"Não foi possível processar o artigo. Erro: {e}")
+            
             if texto_extraido:
                 st.session_state.texto_analisado = texto_extraido
                 st.session_state.pagina_atual = "Resultados"
                 st.rerun()
 
+        # --- ALTERAÇÃO 3: NOVA PÁGINA PARA CHAT COM MÚLTIPLOS ARQUIVOS ---
+        def pagina_chat_multiplos_arquivos():
+            st.header("Chat com Múltiplos Documentos")
+            st.write("Faça o upload de um ou mais arquivos (PDF ou TXT) para conversar com a IA sobre o conteúdo combinado de todos eles.")
+
+            uploaded_files = st.file_uploader(
+                "Escolha os arquivos", 
+                type=["pdf", "txt"], 
+                accept_multiple_files=True,
+                label_visibility="collapsed"
+            )
+
+            if uploaded_files:
+                # Processa os arquivos e combina o texto
+                if st.button("Processar Arquivos e Iniciar Chat"):
+                    texto_combinado = ""
+                    with st.spinner("Extraindo texto de todos os arquivos..."):
+                        for file in uploaded_files:
+                            try:
+                                texto_combinado += f"\n\n--- INÍCIO DO DOCUMENTO: {file.name} ---\n\n"
+                                if file.type == "application/pdf":
+                                    texto_bytes = file.read()
+                                    with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
+                                        texto_combinado += "".join(page.get_text() for page in doc)
+                                elif file.type == "text/plain":
+                                    texto_combinado += file.read().decode("utf-8")
+                                texto_combinado += f"\n\n--- FIM DO DOCUMENTO: {file.name} ---\n\n"
+                            except Exception as e:
+                                st.error(f"Erro ao processar o arquivo {file.name}: {e}")
+                    
+                    st.session_state.texto_multi_analise = texto_combinado
+                    st.success("Arquivos processados! Você já pode iniciar a conversa.")
+
+            # Interface de Chat para múltiplos documentos
+            if "texto_multi_analise" in st.session_state:
+                if "chat_multi_doc" not in st.session_state:
+                    prompt_inicial_chat = f"Você é um especialista que analisou múltiplos documentos. Responda às perguntas do usuário com base no conteúdo combinado a seguir:\n\n{st.session_state.texto_multi_analise}\n---"
+                    model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=prompt_inicial_chat)
+                    st.session_state.chat_multi_doc = model.start_chat(history=[])
+                    st.session_state.chat_multi_messages = []
+
+                st.subheader("Converse com seus Documentos")
+                for msg in st.session_state.get("chat_multi_messages", []):
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                
+                if prompt := st.chat_input("Faça uma pergunta sobre os documentos..."):
+                    st.session_state.chat_multi_messages.append({"role": "user", "content": prompt})
+                    with st.spinner("Analisando sua pergunta..."):
+                        try:
+                            response = st.session_state.chat_multi_doc.send_message(prompt).text
+                            st.session_state.chat_multi_messages.append({"role": "assistant", "content": response})
+                        except Exception as e:
+                            st.error(f"Erro ao comunicar com a IA: {e}")
+                    st.rerun()
+
         def pagina_resultados_e_chat():
             # ... (código da página de resultados inalterado)
-            st.title("Resultados da Análise")
-            if st.sidebar.button("Analisar Outro Conteúdo", use_container_width=True):
+            st.title("Resultados da Análise de Fonte Única")
+            if st.sidebar.button("Voltar ao Início", use_container_width=True):
                 resetar_estado()
                 st.rerun()
             if "analise_estatica" not in st.session_state:
@@ -207,7 +282,7 @@ if st.session_state.get("authentication_status"):
 
         def resetar_estado():
             st.cache_data.clear()
-            keys_to_delete = ["pagina_atual", "texto_analisado", "analise_estatica", "chat_doc", "chat_messages", "fonte_selecao", "video_url"]
+            keys_to_delete = ["pagina_atual", "texto_analisado", "analise_estatica", "chat_doc", "chat_messages", "fonte_selecao_unica", "video_url", "texto_multi_analise", "chat_multi_doc", "chat_multi_messages"]
             for key in keys_to_delete:
                 if key in st.session_state:
                     del st.session_state[key]
