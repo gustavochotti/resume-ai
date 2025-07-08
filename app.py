@@ -8,6 +8,7 @@ from newspaper import Article
 import time
 from supabase import create_client, Client
 from datetime import date, datetime, timedelta
+import uuid
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA E CONEXÕES ---
 st.set_page_config(page_title="Resume Ai", page_icon="🤖", layout="wide")
@@ -101,10 +102,14 @@ else:
 
     elif verificar_validade_assinatura(user_profile):
         
+        
         # --- FUNÇÕES DE LÓGICA E PÁGINAS ---
 
-        # @st.cache_data(show_spinner=False, persist=False)
-        def analisar_texto_unico_com_gemini(_texto):
+        if "analise_key" not in st.session_state:
+            st.session_state.analise_key = str(uuid.uuid4())
+            
+        @st.cache_data(show_spinner=False)
+        def analisar_texto_unico_com_gemini(_texto, _key):
             """Função de backend para a análise de conteúdo único."""
             if not _texto or len(_texto) < 50:
                 st.warning("O texto extraído é muito curto para uma análise significativa.")
@@ -196,11 +201,11 @@ else:
                 for key in list(st.session_state.keys()):
                     if key.startswith("chat_") or key.startswith("texto_") or key in ["pagina_atual", "source_name", "source_type", "analise_estatica"]:
                         st.session_state.pop(key, None)
+                st.session_state.analise_key = str(uuid.uuid4())
                 st.rerun()
 
             if "analise_estatica" not in st.session_state:
-                st.session_state.pop("analise_estatica", None)
-                st.session_state.analise_estatica = analisar_texto_unico_com_gemini(st.session_state.texto_analisado)
+                st.session_state.analise_estatica = analisar_texto_unico_com_gemini(st.session_state.texto_analisado, st.session_state.analise_key)
             
             if "chat_doc_unico" not in st.session_state:
                 prompt_inicial_chat = f"Você é um especialista no seguinte texto:\n---\n{st.session_state.texto_analisado}\n---\nResponda perguntas baseadas exclusivamente neste conteúdo."
