@@ -56,9 +56,9 @@ def show_login_form():
                 try:
                     cr = supabase_admin.auth.admin.create_user({"email": email, "password": password, "email_confirm": True, "user_metadata": {"full_name": full_name}})
                     user_id = cr.user.id
-                    expiry = (date.today() + timedelta(days=7)).isoformat()
+                    expiry = (date.today() + timedelta(days=30)).isoformat()
                     supabase_admin.table("profiles").upsert({"id": user_id, "full_name": full_name, "subscription_valid_until": expiry}, on_conflict="id").execute()
-                    st.success("Conta criada! 7 dias gratuitos concedidos.")
+                    st.success("Conta criada! 30 dias gratuitos concedidos.")
                     st.info("Agora você pode fazer login na aba 'Login'.")
                 except Exception as e: st.error(f"Erro ao criar conta: {e}")
 
@@ -103,13 +103,17 @@ else:
         
         # --- FUNÇÕES DE LÓGICA E PÁGINAS ---
 
+        # AJUSTE 1: A função agora aceita `_source_identifier` para invalidar o cache
         @st.cache_data(show_spinner=False)
-        def analisar_texto_unico_com_gemini(_texto):
+        def analisar_texto_unico_com_gemini(_texto, _source_identifier):
             """Função de backend para a análise de conteúdo único."""
+            # O _source_identifier não é usado aqui, mas sua presença nos argumentos
+            # garante que o cache seja invalidado quando ele muda.
             if not _texto or len(_texto) < 50:
                 st.warning("O texto extraído é muito curto para uma análise significativa.")
                 return None
             
+            # ATUALIZAÇÃO: Usando o modelo gemini-2.5-flash, mais moderno.
             model = genai.GenerativeModel('gemini-2.5-flash')
             prompt_resumo = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
             prompt_analise = f"Analise o seguinte texto e extraia em tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
@@ -163,10 +167,10 @@ else:
                 1. Obtenha a transcrição em um site como o [YouTube Transcript](https://youtubetotranscript.com).
                 2. Salve o texto como um arquivo PDF ou TXT.
                 3. Selecione a opção **"Documento (PDF ou TXT)"** e faça o upload do arquivo.
-                         
+                                    
                 Nossa IA fará a análise completa para você a partir do seu documento.
                 
-                Já estamos trabalhando em uma solução e estará disponível assim que possível. Pedimos desculpas pelo transtorno!
+                Já estamos trabalhando em uma solução e estará disponível assim possível. Pedimos desculpas pelo transtorno!
                 """, icon="⚠️")
                 url = st.text_input("Se ainda desejar tentar, cole a URL do vídeo aqui:")
                 # ... (lógica do YouTube aqui) ...
@@ -192,13 +196,24 @@ else:
 
         def pagina_resultados_e_chat():
             st.title(f"Resultados: {st.session_state.source_name}")
+            
+            # AJUSTE 3: A chave 'upload_unico' agora é limpa para resetar o widget.
             if st.sidebar.button("‹ Voltar e Analisar Outro"):
-                keys_to_clear = ["pagina_atual", "texto_analisado", "source_name", "source_type", "analise_estatica", "chat_doc_unico", "chat_messages_unico"]
-                for k in keys_to_clear: st.session_state.pop(k, None)
+                keys_to_clear = [
+                    "pagina_atual", "texto_analisado", "source_name", 
+                    "source_type", "analise_estatica", "chat_doc_unico", 
+                    "chat_messages_unico", "upload_unico" 
+                ]
+                for k in keys_to_clear: 
+                    st.session_state.pop(k, None)
                 st.rerun()
 
+            # AJUSTE 2: A chamada da função agora passa o nome da fonte para o cache.
             if "analise_estatica" not in st.session_state:
-                st.session_state.analise_estatica = analisar_texto_unico_com_gemini(st.session_state.texto_analisado)
+                st.session_state.analise_estatica = analisar_texto_unico_com_gemini(
+                    st.session_state.texto_analisado,
+                    st.session_state.source_name
+                )
             
             if "chat_doc_unico" not in st.session_state:
                 prompt_inicial_chat = f"Você é um especialista no seguinte texto:\n---\n{st.session_state.texto_analisado}\n---\nResponda perguntas baseadas exclusivamente neste conteúdo."
