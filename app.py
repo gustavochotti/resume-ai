@@ -276,6 +276,13 @@ else:
             st.title("Chat Multi-Documentos")
             st.info("Use esta seção para fazer upload de vários arquivos e conversar sobre o conteúdo combinado.")
 
+            if st.sidebar.button("‹ Voltar e Analisar Outro"):
+                for key in list(st.session_state.keys()):
+                    if key.startswith("chat_") or key.startswith("texto_") or key in ["pagina_atual", "source_name", "source_type", "analise_estatica"]:
+                        st.session_state.pop(key, None)
+                st.session_state.analise_key = str(uuid.uuid4())
+                st.rerun()
+
             uploaded_files = st.file_uploader(
                 "Escolha os arquivos (PDF ou TXT)", 
                 type=["pdf", "txt"], 
