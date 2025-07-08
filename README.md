@@ -2,6 +2,8 @@
 
 Resume Ai é uma plataforma de software como serviço (SaaS) desenvolvida em Python, que utiliza o poder da Inteligência Artificial Generativa para analisar, resumir e interagir com diversas fontes de conteúdo, como PDFs, vídeos do YouTube e artigos da web.
 
+[Acesse a página de apresentação da plataforma](#)
+
 [Acesse a aplicação online: Resume Ai - Live Demo](https://plataforma-resume-ai.streamlit.app)
 
 ---
