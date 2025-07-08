@@ -10,6 +10,9 @@ from supabase import create_client, Client
 from datetime import date, datetime, timedelta
 import uuid
 
+# --- MODELO DE IA ESCOLHIDO ---
+ai_model = 'gemini-2.5-flash'
+
 # --- 1. CONFIGURAÇÃO DA PÁGINA E CONEXÕES ---
 st.set_page_config(page_title="Resume Ai", page_icon="🤖", layout="wide")
 
@@ -108,14 +111,14 @@ else:
         if "analise_key" not in st.session_state:
             st.session_state.analise_key = str(uuid.uuid4())
             
-        @st.cache_data(show_spinner=False, ttl=30)
+        @st.cache_data(show_spinner=False, ttl=10)
         def analisar_texto_unico_com_gemini(_texto, _key):
             """Função de backend para a análise de conteúdo único."""
             if not _texto or len(_texto) < 50:
                 st.warning("O texto extraído é muito curto para uma análise significativa.")
                 return None
             
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            model = genai.GenerativeModel(ai_model)
             prompt_resumo = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
             prompt_analise = f"Analise o seguinte texto e extraia em tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
             prompt_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas:\n\nTexto:\n{_texto}"
@@ -173,8 +176,42 @@ else:
                 
                 Já estamos trabalhando em uma solução e estará disponível assim possível. Pedimos desculpas pelo transtorno!
                 """, icon="⚠️")
-                url = st.text_input("Se ainda desejar tentar, cole a URL do vídeo aqui:")
-                # ... (lógica do YouTube aqui) ...
+
+                url_video = st.text_input("Se ainda desejar tentar, cole a URL do vídeo aqui:")
+
+                if url_video:
+                    st.session_state.video_url = url_video 
+                    with st.spinner("Buscando a transcrição do vídeo..."):
+                        try:
+                            video_id = None
+                            # Extrai o ID de diferentes formatos de URL
+                            if "v=" in url_video:
+                                video_id = url_video.split("v=")[1].split("&")[0]
+                            elif "youtu.be/" in url_video:
+                                video_id = url_video.split("youtu.be/")[1].split("?")[0]
+                            
+                            if video_id:
+                                # Chama a API para obter a transcrição
+                                transcricao_lista = YouTubeTranscriptApi.get_transcript(video_id, languages=['pt', 'en'])
+                                texto_extraido = " ".join([item['text'] for item in transcricao_lista])
+                                
+                                # Prepara para ir para a página de resultados
+                                if texto_extraido:
+                                    st.session_state.texto_analisado = texto_extraido
+                                    st.session_state.source_name = url_video
+                                    st.session_state.source_type = "Vídeo (YouTube)"
+                                    st.session_state.pagina_atual = "Resultados"
+                                    st.rerun()
+                            else:
+                                st.error("URL do YouTube inválida ou formato não reconhecido.")
+
+                        except (TranscriptsDisabled, NoTranscriptFound):
+                            st.error("Não foi possível obter a transcrição. Este vídeo não possui legendas em Português ou Inglês, ou elas estão desativadas.")
+                        except Exception as e:
+                            if 'Too Many Requests' in str(e) or 'blocking requests' in str(e):
+                                st.error("O YouTube bloqueou nosso acesso temporariamente. Por favor, utilize o método alternativo de PDF ou tente novamente mais tarde.")
+                            else:
+                                st.error(f"Houve um erro inesperado ao buscar a transcrição: {e}")
 
             else:  # Artigo da Web
                 url = st.text_input("Cole a URL do artigo:")
@@ -209,7 +246,7 @@ else:
             
             if "chat_doc_unico" not in st.session_state:
                 prompt_inicial_chat = f"Você é um especialista no seguinte texto:\n---\n{st.session_state.texto_analisado}\n---\nResponda perguntas baseadas exclusivamente neste conteúdo."
-                model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=prompt_inicial_chat)
+                model = genai.GenerativeModel(ai_model, system_instruction=prompt_inicial_chat)
                 st.session_state.chat_doc_unico = model.start_chat(history=[])
                 st.session_state.chat_messages_unico = []
 
@@ -269,7 +306,7 @@ else:
             if "texto_multi_analise" in st.session_state:
                 if "chat_multi_doc" not in st.session_state:
                     prompt_inicial_chat = f"Você é um especialista que analisou múltiplos documentos. Responda às perguntas do usuário com base no conteúdo combinado a seguir:\n\n{st.session_state.texto_multi_analise}\n---"
-                    model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=prompt_inicial_chat)
+                    model = genai.GenerativeModel(ai_model, system_instruction=prompt_inicial_chat)
                     st.session_state.chat_multi_doc = model.start_chat(history=[])
                     st.session_state.chat_multi_messages = []
 
