@@ -166,7 +166,7 @@ else:
                          
                 Nossa IA fará a análise completa para você a partir do seu documento.
                 
-                Já estamos trabalhando em uma solução e estará disponível assim possível. Pedimos desculpas pelo transtorno!
+                Já estamos trabalhando em uma solução e estará disponível assim que possível. Pedimos desculpas pelo transtorno!
                 """, icon="⚠️")
                 url = st.text_input("Se ainda desejar tentar, cole a URL do vídeo aqui:")
                 # ... (lógica do YouTube aqui) ...
