@@ -1,1 +1,51 @@
+# ===================================================================
+# Arquivos de Segredos e Variáveis de Ambiente
+# NUNCA ENVIE ESTES ARQUIVOS PARA O GITHUB!
+# ===================================================================
+.env
+.streamlit/secrets.toml
+secrets.toml
 
+
+# ===================================================================
+# Ambiente Virtual do Python
+# Esta pasta é recriada a partir do requirements.txt
+# ===================================================================
+venv/
+.venv/
+env/
+ENV/
+
+
+# ===================================================================
+# Cache e arquivos compilados do Python
+# São gerados automaticamente e não devem ser versionados
+# ===================================================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+
+# ===================================================================
+# Cache de Ferramentas de Teste
+# ===================================================================
+.pytest_cache/
+.coverage
+
+
+# ===================================================================
+# Arquivos de configuração de Editores e IDEs
+# (Ex: VSCode, PyCharm)
+# ===================================================================
+.vscode/
+.idea/
+*.swp
+
+
+# ===================================================================
+# Arquivos gerados pelo Sistema Operacional
+# (Ex: macOS, Windows)
+# ===================================================================
+.DS_Store
+Thumbs.db
