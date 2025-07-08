@@ -56,7 +56,7 @@ def show_login_form():
                 try:
                     cr = supabase_admin.auth.admin.create_user({"email": email, "password": password, "email_confirm": True, "user_metadata": {"full_name": full_name}})
                     user_id = cr.user.id
-                    expiry = (date.today() + timedelta(days=30)).isoformat()
+                    expiry = (date.today() + timedelta(days=7)).isoformat()
                     supabase_admin.table("profiles").upsert({"id": user_id, "full_name": full_name, "subscription_valid_until": expiry}, on_conflict="id").execute()
                     st.success("Conta criada! 30 dias gratuitos concedidos.")
                     st.info("Agora você pode fazer login na aba 'Login'.")
