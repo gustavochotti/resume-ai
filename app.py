@@ -103,7 +103,7 @@ else:
         
         # --- FUNÇÕES DE LÓGICA E PÁGINAS ---
 
-        @st.cache_data(show_spinner=False, persist=False)
+        # @st.cache_data(show_spinner=False, persist=False)
         def analisar_texto_unico_com_gemini(_texto):
             """Função de backend para a análise de conteúdo único."""
             if not _texto or len(_texto) < 50:
