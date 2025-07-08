@@ -1,202 +1,245 @@
 import streamlit as st
 import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
 import fitz  # PyMuPDF
 from io import BytesIO
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from newspaper import Article
 import time
-import streamlit_authenticator as stauth
-import yaml
-from yaml.loader import SafeLoader
-from datetime import date
-from google.api_core import exceptions as google_exceptions
+from supabase import create_client, Client
+from datetime import date, datetime, timedelta
 
-# --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Resume Ai", page_icon="resume ai", layout="wide")
+# --- 1. CONFIGURAÇÃO DA PÁGINA E CONEXÕES ---
+st.set_page_config(page_title="Resume Ai", page_icon="🤖", layout="wide")
 
-# --- 2. LÓGICA DE AUTENTICAÇÃO ---
-try:
-    with open('config.yaml') as file:
-        config = yaml.load(file, Loader=SafeLoader)
-except FileNotFoundError:
-    st.error("Arquivo de configuração 'config.yaml' não encontrado.")
-    st.stop()
+@st.cache_resource
+def init_connections():
+    """Inicializa as conexões com Supabase e Gemini API."""
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        anon_key = st.secrets["SUPABASE_KEY"]
+        service_key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY")
+        supabase = create_client(url, anon_key)
+        supabase_admin = create_client(url, service_key) if service_key else None
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        return supabase, supabase_admin
+    except Exception as e:
+        st.error(f"Erro ao inicializar as conexões. Verifique suas chaves de API. Erro: {e}")
+        st.stop()
 
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days']
-)
+supabase, supabase_admin = init_connections()
 
-authenticator.login()
+# --- 2. FUNÇÕES DE AUTENTICAÇÃO E PERFIL ---
+def show_login_form():
+    st.title("Bem-vindo ao Resume Ai")
+    st.write("Faça login ou crie uma conta para continuar.")
+    login_tab, signup_tab = st.tabs(["Login", "Criar Conta"])
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Senha", type="password")
+            if st.form_submit_button("Login"):
+                try:
+                    session = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    st.session_state.user_session = session.model_dump()
+                    st.rerun()
+                except Exception: st.error("Erro no login: Verifique seu e-mail e senha.")
+    with signup_tab:
+        with st.form("signup_form"):
+            email = st.text_input("Email para cadastro")
+            password = st.text_input("Crie uma senha", type="password")
+            full_name = st.text_input("Nome Completo")
+            if st.form_submit_button("Criar Conta"):
+                if not supabase_admin:
+                    st.error("A criação de novas contas está temporariamente desabilitada.")
+                    return
+                try:
+                    cr = supabase_admin.auth.admin.create_user({"email": email, "password": password, "email_confirm": True, "user_metadata": {"full_name": full_name}})
+                    user_id = cr.user.id
+                    expiry = (date.today() + timedelta(days=30)).isoformat()
+                    supabase_admin.table("profiles").upsert({"id": user_id, "full_name": full_name, "subscription_valid_until": expiry}, on_conflict="id").execute()
+                    st.success("Conta criada! 30 dias gratuitos concedidos.")
+                    st.info("Agora você pode fazer login na aba 'Login'.")
+                except Exception as e: st.error(f"Erro ao criar conta: {e}")
 
-# --- 3. CONTROLE DE ACESSO E LÓGICA DA APLICAÇÃO ---
-if st.session_state.get("authentication_status"):
-    # ---- INÍCIO: Bloco de código para usuários logados ----
-
-    username = st.session_state.get("username")
-    user_data = config['credentials']['usernames'].get(username, {})
-
-    def verificar_validade_assinatura(details):
-        if 'subscription_valid_until' not in details: return False
+def get_user_profile():
+    if "user_session" in st.session_state:
         try:
-            data_validade = date.fromisoformat(str(details['subscription_valid_until']))
-            return date.today() <= data_validade
-        except (ValueError, TypeError): return False
+            user_id = st.session_state.user_session['user']['id']
+            response = supabase.table('profiles').select('*').eq('id', user_id).single().execute()
+            return response.data
+        except Exception: return None
+    return None
 
-    if verificar_validade_assinatura(user_data):
+def verificar_validade_assinatura(profile):
+    if not profile: return False
+    raw = profile.get('subscription_valid_until')
+    if not raw: return False
+    try:
+        if isinstance(raw, str): valid_date = date.fromisoformat(raw)
+        elif isinstance(raw, datetime): valid_date = raw.date()
+        elif isinstance(raw, date): valid_date = raw
+        else: return False
+        return date.today() <= valid_date
+    except (ValueError, TypeError): return False
+
+# --- 3. CONTROLE DE FLUXO PRINCIPAL DA APLICAÇÃO ---
+
+if "user_session" not in st.session_state or st.session_state.user_session is None:
+    show_login_form()
+else:
+    user_profile = get_user_profile()
+
+    if user_profile is None:
+        st.error("Erro Crítico: Não foi possível carregar os dados do seu perfil.")
         with st.sidebar:
-            st.write(f'Bem-vindo(a), *{st.session_state["name"]}*')
-            authenticator.logout('Logout', 'main')
-
-        # --- FUNÇÕES DE BACKEND DO APP ---
-        try:
-            GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-            genai.configure(api_key=GEMINI_API_KEY)
-        except Exception as e:
-            st.error(f"Erro ao configurar a API do Gemini. Verifique sua chave em st.secrets. Erro: {e}")
-            st.stop()
-
-        @st.cache_data(show_spinner=False)
-        def analisar_texto_com_gemini(_texto):
-            if not _texto or len(_texto) < 100:
-                st.warning("O texto extraído é muito curto para uma análise significativa.")
-                return None
-            try:
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                prompt_resumo_simples = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
-                prompt_analise_estruturada = f"Analise o seguinte texto e extraia os seguintes componentes em formato de tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
-                prompt_gerar_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas para testar o entendimento profundo do conteúdo:\n\nTexto:\n{_texto}"
-                resultados = {}
-                with st.spinner("Resume ai está trabalhando... (Isso pode levar um momento)"):
-                    resposta_resumo = model.generate_content(prompt_resumo_simples)
-                    resposta_analise = model.generate_content(prompt_analise_estruturada)
-                    resposta_perguntas = model.generate_content(prompt_gerar_perguntas)
-                    resultados["resumo_simples"] = resposta_resumo.text
-                    resultados["analise_estruturada"] = resposta_analise.text
-                    resultados["perguntas_criticas"] = resposta_perguntas.text
-                return resultados
-            except google_exceptions.ResourceExhausted as e:
-                st.error("Você atingiu o limite de uso da API do Gemini. Por favor, tente novamente mais tarde.")
-                return None
-            except Exception as e:
-                st.error(f"Houve um erro na comunicação com a IA. Tente novamente mais tarde.")
-                return None
-
-        # --- LÓGICA DAS PÁGINAS DO APP ---
-        def pagina_principal():
-            st.title("Precisa de ajuda? Eu resumo isso ai para você...")
-            st.write("Resume Ai é uma plataforma de IA criada para analisar, resumir e conversar com qualquer conteúdo.")
-            st.sidebar.title("Fonte do Conteúdo")
-            
-            # --- ALTERAÇÃO 1: ADICIONADA NOVA OPÇÃO NO MENU ---
-            opcoes_menu = [
-                "Análise de Fonte Única", 
-                "Chat com Múltiplos Documentos"
-            ]
-            pagina_selecionada = st.sidebar.selectbox("Escolha o modo de análise:", opcoes_menu)
-
-            if pagina_selecionada == "Análise de Fonte Única":
-                pagina_analise_unica()
-            elif pagina_selecionada == "Chat com Múltiplos Documentos":
-                pagina_chat_multiplos_arquivos()
-        
-        def pagina_analise_unica():
-            st.header("Análise de Fonte Única")
-            fonte_selecionada = st.radio(
-                "Selecione o que você quer analisar:",
-                ["Documento (PDF ou TXT)", "Vídeo (YouTube)", "Artigo da Web"],
-                key="fonte_selecao_unica",
-                horizontal=True
-            )
-            
-            texto_extraido = None
-            if fonte_selecionada == "Documento (PDF ou TXT)":
-                # --- ALTERAÇÃO 2: UPLOAD AGORA ACEITA PDF E TXT ---
-                st.subheader("Analisador de Documentos (PDF ou TXT)")
-                uploaded_file = st.file_uploader("Escolha um arquivo PDF ou TXT", type=["pdf", "txt"], label_visibility="collapsed")
-                if uploaded_file:
-                    with st.spinner("Extraindo texto do arquivo..."):
-                        try:
-                            if uploaded_file.type == "application/pdf":
-                                texto_bytes = uploaded_file.read()
-                                with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
-                                    texto_extraido = "".join(page.get_text() for page in doc)
-                            elif uploaded_file.type == "text/plain":
-                                texto_extraido = uploaded_file.read().decode("utf-8")
-                        except Exception as e:
-                            st.error(f"Houve um erro ao ler o arquivo: {e}")
-            
-            elif fonte_selecionada == "Vídeo (YouTube)":
-                # ... (código do YouTube inalterado)
-                st.subheader("Analisador de Vídeos do YouTube")
-                st.error("""
-                **Aviso Importante sobre a Análise de Vídeos**
-
-            Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma que bloqueiam servidores em nuvem. Para garantir sua análise, recomendamos a seguinte alternativa:
-
-            1.  **Obtenha a transcrição:** Utilize um site como o [YouTube Transcript](https://youtubetotranscript.com).
-            2.  **Salve como PDF ou TXT:** Copie o texto e salve-o como um arquivo PDF ou TXT.
-            3.  **Analise o TXT:** Selecione a opção **"Documento (PDF ou TXT)"** no menu Análise de Fonte única ao lado e faça o upload do arquivo.
-
-            Nossa IA fará a análise completa para você a partir do seu documento.
-
-            Pedimos desculpas pelo transtorno!
-            """)
-                st.write("Se ainda assim desejar tentar a extração automática, cole a URL abaixo:")
-                url_video = st.text_input("Cole a URL do vídeo do YouTube:")
-                if url_video:
-                    st.session_state.video_url = url_video 
-                    with st.spinner("Buscando a transcrição do vídeo..."):
-                        try:
-                            video_id = None
-                            if "v=" in url_video: video_id = url_video.split("v=")[1].split("&")[0]
-                            elif "youtu.be/" in url_video: video_id = url_video.split("youtu.be/")[1].split("?")[0]
-                            if video_id:
-                                transcricao_lista = YouTubeTranscriptApi.get_transcript(video_id, languages=['pt', 'en'])
-                                texto_extraido = " ".join([item['text'] for item in transcricao_lista])
-                            else: st.error("URL do YouTube inválida.")
-                        except (TranscriptsDisabled, NoTranscriptFound):
-                            st.error("Não foi possível obter a transcrição. Este vídeo não possui legendas ou elas estão desativadas.")
-                        except Exception as e:
-                            if 'Too Many Requests' in str(e) or 'blocking requests' in str(e):
-                                st.error("O YouTube bloqueou nosso acesso. Por favor, utilize o método alternativo de PDF.")
-                            else:
-                                st.error("Houve um erro inesperado ao buscar a transcrição.")
-            
-            elif fonte_selecionada == "Artigo da Web":
-                # ... (código de artigo da web inalterado)
-                st.subheader("Analisador de Artigos da Web")
-                url_artigo = st.text_input("Cole a URL do artigo:")
-                if url_artigo:
-                    with st.spinner("Lendo o artigo da web..."):
-                        try:
-                            article = Article(url_artigo)
-                            article.download()
-                            article.parse()
-                            texto_extraido = article.text
-                        except Exception as e: st.error(f"Não foi possível processar o artigo. Erro: {e}")
-            
-            if texto_extraido:
-                st.session_state.texto_analisado = texto_extraido
-                st.session_state.pagina_atual = "Resultados"
+            st.write("⚠️ Erro de Perfil")
+            if st.button("Logout"):
+                supabase.auth.sign_out()
+                for key in list(st.session_state.keys()): del st.session_state[key]
                 st.rerun()
 
-        # --- ALTERAÇÃO 3: NOVA PÁGINA PARA CHAT COM MÚLTIPLOS ARQUIVOS ---
+    elif verificar_validade_assinatura(user_profile):
+        
+        # --- FUNÇÕES DE LÓGICA E PÁGINAS ---
+
+        @st.cache_data(show_spinner=False)
+        def analisar_texto_unico_com_gemini(_texto):
+            """Função de backend para a análise de conteúdo único."""
+            if not _texto or len(_texto) < 50:
+                st.warning("O texto extraído é muito curto para uma análise significativa.")
+                return None
+            
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            prompt_resumo = f"Explique o conteúdo principal do seguinte texto como se eu tivesse 10 anos de idade (ELI5):\n\n{_texto}"
+            prompt_analise = f"Analise o seguinte texto e extraia em tópicos:\n- A Ideia Principal\n- Os Argumentos ou Passos Apresentados\n- A Conclusão Principal\n\nTexto:\n{_texto}"
+            prompt_perguntas = f"Baseado no texto a seguir, gere 3 perguntas inteligentes e críticas:\n\nTexto:\n{_texto}"
+            
+            with st.spinner("Resume Ai está trabalhando na sua análise..."):
+                r1 = model.generate_content(prompt_resumo)
+                r2 = model.generate_content(prompt_analise)
+                r3 = model.generate_content(prompt_perguntas)
+            
+            return {"resumo_simples": r1.text, "analise_estruturada": r2.text, "perguntas_criticas": r3.text}
+
+        def pagina_principal():
+            """Renderiza a página principal com o menu de ferramentas."""
+            st.sidebar.title("Menu de Ferramentas")
+            opc = st.sidebar.selectbox(
+                "O que você deseja fazer?", 
+                ["Analisar Conteúdo Único", "Chat com Múltiplos Documentos", "Ver Histórico de Análises"]
+            )
+            st.sidebar.markdown("---")
+
+            if opc == "Analisar Conteúdo Único":
+                pagina_analise_unica()
+            elif opc == "Chat com Múltiplos Documentos":
+                pagina_chat_multiplos_arquivos()
+            elif opc == "Ver Histórico de Análises":
+                pagina_historico()
+
+        def pagina_analise_unica():
+            st.title("Análise de Conteúdo Individual")
+            st.info("Use esta seção para analisar um único documento, vídeo ou artigo da web.")
+            
+            st.header("Analisar Novo Conteúdo")
+            fonte = st.radio("Selecione a fonte:", ["Documento (PDF ou TXT)", "Vídeo (YouTube)", "Artigo da Web"], key="fonte_unica", horizontal=True)
+            texto_extraido, source_name = None, None
+
+            if fonte == "Documento (PDF ou TXT)":
+                f = st.file_uploader("Escolha um arquivo", type=["pdf", "txt"], key="upload_unico")
+                if f:
+                    source_name = f.name
+                    with st.spinner(f"Extraindo texto de {f.name}..."):
+                        if f.type == "application/pdf":
+                            texto_extraido = "".join(p.get_text() for p in fitz.open(stream=f.read(), filetype="pdf"))
+                        else:
+                            texto_extraido = f.read().decode("utf-8")
+            
+            elif fonte == "Vídeo (YouTube)":
+                st.error("""
+                **Aviso Importante sobre a Análise de Vídeos**
+                Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma. Para garantir sua análise, recomendamos:
+                1. Obtenha a transcrição em um site como o [YouTube Transcript](https://youtubetotranscript.com).
+                2. Salve o texto como um arquivo PDF ou TXT.
+                3. Selecione a opção **"Documento (PDF ou TXT)"** e faça o upload do arquivo.
+                         
+                Nossa IA fará a análise completa para você a partir do seu documento.
+                
+                Já estamos trabalhando em uma solução e estará disponível assim possível. Pedimos desculpas pelo transtorno!
+                """, icon="⚠️")
+                url = st.text_input("Se ainda desejar tentar, cole a URL do vídeo aqui:")
+                # ... (lógica do YouTube aqui) ...
+
+            else:  # Artigo da Web
+                url = st.text_input("Cole a URL do artigo:")
+                if url:
+                    source_name = url
+                    with st.spinner("Lendo o artigo..."):
+                        try:
+                            art = Article(url); art.download(); art.parse()
+                            texto_extraido = art.text
+                        except Exception as e: st.error(f"Erro ao processar o artigo: {e}")
+
+            if texto_extraido:
+                st.success("Conteúdo extraído! Navegando para a página de resultados...")
+                st.session_state.update({
+                    "texto_analisado": texto_extraido, "source_name": source_name,
+                    "source_type": fonte, "pagina_atual": "Resultados_Unico"
+                })
+                time.sleep(1)
+                st.rerun()
+
+        def pagina_resultados_e_chat():
+            st.title(f"Resultados: {st.session_state.source_name}")
+            if st.sidebar.button("‹ Voltar e Analisar Outro"):
+                keys_to_clear = ["pagina_atual", "texto_analisado", "source_name", "source_type", "analise_estatica", "chat_doc_unico", "chat_messages_unico"]
+                for k in keys_to_clear: st.session_state.pop(k, None)
+                st.rerun()
+
+            if "analise_estatica" not in st.session_state:
+                st.session_state.analise_estatica = analisar_texto_unico_com_gemini(st.session_state.texto_analisado)
+            
+            if "chat_doc_unico" not in st.session_state:
+                prompt_inicial_chat = f"Você é um especialista no seguinte texto:\n---\n{st.session_state.texto_analisado}\n---\nResponda perguntas baseadas exclusivamente neste conteúdo."
+                model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=prompt_inicial_chat)
+                st.session_state.chat_doc_unico = model.start_chat(history=[])
+                st.session_state.chat_messages_unico = []
+
+            tab_analise, tab_chat = st.tabs(["📊 Análise Inicial", "💬 Conversar com o Documento"])
+
+            with tab_analise:
+                resultados = st.session_state.get("analise_estatica")
+                if resultados:
+                    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Resumo Simples (ELI5)", "Análise Estruturada", "Perguntas Críticas"])
+                    with sub_tab1: st.markdown(resultados["resumo_simples"])
+                    with sub_tab2: st.markdown(resultados["analise_estruturada"])
+                    with sub_tab3: st.markdown(resultados["perguntas_criticas"])
+                else: st.error("A análise não pôde ser gerada.")
+            
+            with tab_chat:
+                for msg in st.session_state.chat_messages_unico:
+                    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+                
+                if prompt := st.chat_input("Faça uma pergunta sobre o conteúdo..."):
+                    st.session_state.chat_messages_unico.append({"role": "user", "content": prompt})
+                    with st.spinner("Analisando sua pergunta..."):
+                        response = st.session_state.chat_doc_unico.send_message(prompt).text
+                        st.session_state.chat_messages_unico.append({"role": "assistant", "content": response})
+                    st.rerun()
+
         def pagina_chat_multiplos_arquivos():
-            st.header("Chat com Múltiplos Documentos")
-            st.write("Faça o upload de um ou mais arquivos (PDF ou TXT) para conversar com a IA sobre o conteúdo combinado de todos eles.")
+            st.title("Chat Multi-Documentos")
+            st.info("Use esta seção para fazer upload de vários arquivos e conversar sobre o conteúdo combinado.")
 
             uploaded_files = st.file_uploader(
-                "Escolha os arquivos", 
+                "Escolha os arquivos (PDF ou TXT)", 
                 type=["pdf", "txt"], 
                 accept_multiple_files=True,
-                label_visibility="collapsed"
+                key="upload_multi"
             )
 
             if uploaded_files:
-                # Processa os arquivos e combina o texto
                 if st.button("Processar Arquivos e Iniciar Chat"):
                     texto_combinado = ""
                     with st.spinner("Extraindo texto de todos os arquivos..."):
@@ -214,9 +257,8 @@ if st.session_state.get("authentication_status"):
                                 st.error(f"Erro ao processar o arquivo {file.name}: {e}")
                     
                     st.session_state.texto_multi_analise = texto_combinado
-                    st.success("Arquivos processados! Você já pode iniciar a conversa.")
+                    st.success("Arquivos processados! Você já pode iniciar a conversa abaixo.")
 
-            # Interface de Chat para múltiplos documentos
             if "texto_multi_analise" in st.session_state:
                 if "chat_multi_doc" not in st.session_state:
                     prompt_inicial_chat = f"Você é um especialista que analisou múltiplos documentos. Responda às perguntas do usuário com base no conteúdo combinado a seguir:\n\n{st.session_state.texto_multi_analise}\n---"
@@ -229,7 +271,7 @@ if st.session_state.get("authentication_status"):
                     with st.chat_message(msg["role"]):
                         st.markdown(msg["content"])
                 
-                if prompt := st.chat_input("Faça uma pergunta sobre os documentos..."):
+                if prompt := st.chat_input("Faça uma pergunta sobre o conteúdo combinado..."):
                     st.session_state.chat_multi_messages.append({"role": "user", "content": prompt})
                     with st.spinner("Analisando sua pergunta..."):
                         try:
@@ -238,70 +280,35 @@ if st.session_state.get("authentication_status"):
                         except Exception as e:
                             st.error(f"Erro ao comunicar com a IA: {e}")
                     st.rerun()
+        
+        def pagina_historico():
+            st.title("Histórico de Análises")
+            st.write("Seu histórico de análises será exibido aqui.")
+            st.info("Funcionalidade em desenvolvimento. Estará disponível em breve...")
+            # ...
 
-        def pagina_resultados_e_chat():
-            # ... (código da página de resultados inalterado)
-            st.title("Resultados da Análise de Fonte Única")
-            if st.sidebar.button("Voltar ao Início", use_container_width=True):
-                resetar_estado()
+        # --- ROTEADOR PRINCIPAL ---
+        with st.sidebar:
+            st.write(f'Bem-vindo(a), *{user_profile.get("full_name", "Usuário")}*')
+            if st.button("Logout"):
+                supabase.auth.sign_out()
+                for key in list(st.session_state.keys()): del st.session_state[key]
                 st.rerun()
-            if "analise_estatica" not in st.session_state:
-                st.session_state.analise_estatica = analisar_texto_com_gemini(st.session_state.texto_analisado)
-            if "chat_doc" not in st.session_state:
-                prompt_inicial_chat = f"Você é um especialista no documento a seguir...\n\nO texto é:\n---\n{st.session_state.texto_analisado}\n---"
-                model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=prompt_inicial_chat)
-                st.session_state.chat_doc = model.start_chat(history=[])
-                st.session_state.chat_messages = []
-            lista_de_abas = ["Análise Inicial", "Conversar com o Documento"]
-            if st.session_state.get("video_url"):
-                lista_de_abas.append("Assistir ao Vídeo")
-            tabs = st.tabs(lista_de_abas)
-            with tabs[0]:
-                st.header("Análise Automática do Conteúdo")
-                resultados = st.session_state.get("analise_estatica")
-                if resultados:
-                    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Resumo Simples (ELI5)", "Análise Estruturada", "Perguntas Críticas"])
-                    with sub_tab1: st.markdown(resultados["resumo_simples"])
-                    with sub_tab2: st.markdown(resultados["analise_estruturada"])
-                    with sub_tab3: st.markdown(resultados["perguntas_criticas"])
-                else: st.error("A análise não pôde ser gerada.")
-            with tabs[1]:
-                st.header("Converse com seu Documento")
-                for msg in st.session_state.chat_messages:
-                    with st.chat_message(msg["role"]): st.markdown(msg["content"])
-                if prompt := st.chat_input("Faça uma pergunta sobre o conteúdo..."):
-                    st.session_state.chat_messages.append({"role": "user", "content": prompt})
-                    with st.spinner("Analisando sua pergunta..."):
-                        response = st.session_state.chat_doc.send_message(prompt).text
-                    st.session_state.chat_messages.append({"role": "assistant", "content": response})
-                    st.rerun()
-            if len(tabs) > 2:
-                with tabs[2]:
-                    st.header("Player do Vídeo Original")
-                    st.video(st.session_state.video_url)
 
-        def resetar_estado():
-            st.cache_data.clear()
-            keys_to_delete = ["pagina_atual", "texto_analisado", "analise_estatica", "chat_doc", "chat_messages", "fonte_selecao_unica", "video_url", "texto_multi_analise", "chat_multi_doc", "chat_multi_messages"]
-            for key in keys_to_delete:
-                if key in st.session_state:
-                    del st.session_state[key]
-
-        # --- CONTROLE DE NAVEGAÇÃO PRINCIPAL DO APP ---
         if "pagina_atual" not in st.session_state:
             st.session_state.pagina_atual = "Principal"
+
         if st.session_state.pagina_atual == "Principal":
             pagina_principal()
-        elif st.session_state.pagina_atual == "Resultados":
+        elif st.session_state.pagina_atual == "Resultados_Unico":
             pagina_resultados_e_chat()
 
-    else:
-        # Se a assinatura expirou
-        st.error("Sua assinatura expirou. Por favor, entre em contato para renovar seu acesso.")
+    else: # Assinatura expirada
+        st.error("Sua assinatura expirou.")
         with st.sidebar:
-            authenticator.logout('Logout', 'main')
-
-elif st.session_state.get("authentication_status") is False:
-    st.error('Usuário ou senha incorreta')
-elif st.session_state.get("authentication_status") is None:
-    st.warning('Por favor, insira seu usuário e senha para acessar o Resume Ai.')
+            st.write(f'Olá, *{user_profile.get("full_name", "Usuário")}*')
+            st.write("Status: 🔴 Assinatura Expirada")
+            if st.button("Logout"):
+                supabase.auth.sign_out()
+                for key in list(st.session_state.keys()): del st.session_state[key]
+                st.rerun()
