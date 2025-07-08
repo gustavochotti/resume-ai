@@ -36,7 +36,7 @@ Ferramenta poderosa onde o usuário pode fazer o upload de vários arquivos simu
 
 ### Autenticação e Histórico
 
-Sistema de login seguro e persistência de dados com um banco de dados PostgreSQL (via Supabase), permitindo que cada usuário acesse seu histórico de análises passadas.
+A plataforma possui um sistema de login seguro e futuramente terá a persistência de dados através de um banco de dados, permitindo que cada usuário acesse seu histórico de análises passadas.
 
 ---
 
