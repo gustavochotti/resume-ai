@@ -108,7 +108,7 @@ else:
         if "analise_key" not in st.session_state:
             st.session_state.analise_key = str(uuid.uuid4())
             
-        @st.cache_data(show_spinner=False, ttl=30))
+        @st.cache_data(show_spinner=False, ttl=30)
         def analisar_texto_unico_com_gemini(_texto, _key):
             """Função de backend para a análise de conteúdo único."""
             if not _texto or len(_texto) < 50:
