@@ -14,7 +14,7 @@ import uuid
 ai_model = 'gemini-2.5-flash'
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA E CONEXÕES ---
-st.set_page_config(page_title="Resume Ai", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Resume Ai", page_icon="💠", layout="wide")
 
 @st.cache_resource
 def init_connections():
