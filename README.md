@@ -12,7 +12,7 @@ Resume Ai é uma plataforma de software como serviço (SaaS) desenvolvida em Pyt
 
 O Resume Ai foi projetado para otimizar o processo de aprendizado e análise, oferecendo um conjunto robusto de funcionalidades:
 
-### Análise Multi-Fonte
+### 🔍 Análise Multi-Fonte
 
 Capacidade de processar e extrair texto de:
 
