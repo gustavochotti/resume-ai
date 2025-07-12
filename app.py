@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 import uuid
 
 # --- MODELO DE IA ESCOLHIDO ---
-ai_model = 'gemini-1.5-flash'
+ai_model = 'gemini-2.5-flash'
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA E CONEXÕES ---
 st.set_page_config(page_title="Resume Ai", page_icon="💠", layout="wide")
