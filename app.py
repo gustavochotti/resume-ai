@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 import uuid
 
 # --- MODELO DE IA ESCOLHIDO ---
-ai_model = 'gemini-2.5-flash'
+ai_model = 'gemini-1.5-flash'
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA E CONEXÕES ---
 st.set_page_config(page_title="Resume Ai", page_icon="💠", layout="wide")
@@ -111,7 +111,6 @@ else:
             st.title(f"Bem-vindo(a) ao Resume Ai, *{user_profile.get('full_name', 'Usuário')}*!")
             st.subheader("O que você gostaria de fazer hoje?")
             
-            # Acessa o dicionário PAGES, que agora estará definido
             cols = st.columns(len(PAGES))
             for i, (page_name, page_data) in enumerate(PAGES.items()):
                 with cols[i]:
@@ -156,19 +155,16 @@ else:
                         else:
                             texto_extraido = f.read().decode("utf-8")
             elif fonte == "Vídeo (YouTube)":
-                # st.error("Funcionalidade de vídeo em manutenção. Por favor, use a opção de documento.", icon="⚠️")
-                
                 st.error("""
                 Estamos enfrentando instabilidades para obter a transcrição diretamente do YouTube devido a questões de segurança da plataforma. Para garantir sua análise, recomendamos:
                 1. Obtenha a transcrição em um site como o [YouTube Transcript](https://youtubetotranscript.com).
                 2. Salve o texto como um arquivo PDF ou TXT.
                 3. Selecione a opção **"Documento (PDF ou TXT)"** e faça o upload do arquivo.
-                         
+                
                 Nossa IA fará a análise completa para você a partir do seu documento.
                 
                 Já estamos trabalhando em uma solução e estará disponível assim que possível. Pedimos desculpas pelo transtorno!
                 """, icon="⚠️")
-
             else:
                 url = st.text_input("Cole a URL do artigo:")
                 if url:
@@ -294,21 +290,48 @@ else:
                             st.error(f"Erro ao comunicar com a IA: {e}")
                     st.rerun()
         
+        # --- FUNÇÃO MODIFICADA ---
         def pagina_suas_notas():
-            st.title("Suas Notas Salvas")
-            st.info("Aqui você pode ver, baixar e excluir suas anotações.")
+            st.title("Suas Notas")
+
+            # Formulário para criar uma nova nota
+            with st.expander("➕ Criar uma Nova Nota"):
+                with st.form("new_note_form", clear_on_submit=True):
+                    new_title = st.text_input("Título da nova nota")
+                    new_content = st.text_area("Conteúdo", height=200)
+                    submitted = st.form_submit_button("Salvar Nova Nota")
+
+                    if submitted:
+                        if not new_title.strip() or not new_content.strip():
+                            st.warning("Por favor, preencha o título e o conteúdo para salvar.")
+                        else:
+                            try:
+                                user_id = st.session_state.user_session['user']['id']
+                                data = {"user_id": user_id, "title": new_title, "content": new_content}
+                                supabase.table("user_notes").insert(data).execute()
+                                st.success(f'Nota "{new_title}" salva com sucesso!')
+                                time.sleep(1) # Delay para o usuário ler a mensagem de sucesso
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Ocorreu um erro ao salvar a nota: {e}")
+
+            st.markdown("---")
+            st.subheader("Notas Salvas")
+            
+            # Lógica para exibir as notas existentes
             try:
                 user_id = st.session_state.user_session['user']['id']
                 response = supabase.table("user_notes").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
                 notes = response.data
                 if not notes:
-                    st.write("Você ainda não tem nenhuma nota salva.")
+                    st.info("Você ainda não tem nenhuma nota salva. Crie uma acima!")
+                
                 for note in notes:
                     with st.expander(f"**{note['title']}** - *Salvo em: {datetime.fromisoformat(note['created_at']).strftime('%d/%m/%Y %H:%M')}*"):
                         st.markdown(note['content'])
                         col1, col2 = st.columns([1, 0.2])
                         with col1:
-                            st.download_button(label="Baixar como .txt", data=note['content'], file_name=f"{note['title']}.txt", mime="text/plain", key=f"download_{note['id']}")
+                            st.download_button(label="Baixar .txt", data=note['content'], file_name=f"{note['title']}.txt", mime="text/plain", key=f"download_{note['id']}")
                         with col2:
                             if st.button("Excluir", key=f"delete_{note['id']}", type="primary"):
                                 try:
@@ -321,23 +344,10 @@ else:
             except Exception as e:
                 st.error(f"Não foi possível carregar suas notas: {e}")
         
-        # --- CORREÇÃO: Dicionário PAGES movido para DEPOIS da definição das funções ---
         PAGES = {
-            "Analisar Conteúdo": {
-                "func": pagina_analise_unica,
-                "icon": "📄",
-                "desc": "Extraia insights de um único documento, vídeo ou artigo."
-            },
-            "Chat Multi-Documentos": {
-                "func": pagina_chat_multiplos_arquivos,
-                "icon": "📚",
-                "desc": "Converse com vários arquivos ao mesmo tempo."
-            },
-            "Suas Notas": {
-                "func": pagina_suas_notas,
-                "icon": "📝",
-                "desc": "Visualize, baixe e gerencie suas anotações salvas."
-            }
+            "Analisar Conteúdo": { "func": pagina_analise_unica, "icon": "📄", "desc": "Extraia insights de um único documento, vídeo ou artigo."},
+            "Chat Multi-Documentos": { "func": pagina_chat_multiplos_arquivos, "icon": "📚", "desc": "Converse com vários arquivos ao mesmo tempo."},
+            "Suas Notas": { "func": pagina_suas_notas, "icon": "📝", "desc": "Visualize, baixe e gerencie suas anotações salvas."}
         }
         
         # --- LÓGICA DE NAVEGAÇÃO E ROTEAMENTO ---
