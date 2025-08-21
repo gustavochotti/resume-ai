@@ -243,43 +243,67 @@ else:
         
         def pagina_chat_multiplos_arquivos():
             st.title("Chat Multi-Documentos")
-            if "texto_multi_analise" not in st.session_state:
-                st.info("Use esta seção para fazer upload de vários arquivos e conversar sobre o conteúdo combinado.")
-                uploaded_files = st.file_uploader("Escolha os arquivos (PDF ou TXT)", type=["pdf", "txt"], accept_multiple_files=True, key="upload_multi")
-                if uploaded_files:
-                    if st.button("Processar Arquivos e Iniciar Chat"):
-                        texto_combinado = ""
-                        with st.spinner("Extraindo texto de todos os arquivos..."):
-                            for file in uploaded_files:
-                                try:
-                                    texto_combinado += f"\n\n--- INÍCIO DO DOCUMENTO: {file.name} ---\n\n"
-                                    if file.type == "application/pdf":
-                                        texto_bytes = file.read()
-                                        with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
-                                            texto_combinado += "".join(page.get_text() for page in doc)
-                                    elif file.type == "text/plain":
-                                        texto_combinado += file.read().decode("utf-8")
-                                    texto_combinado += f"\n\n--- FIM DO DOCUMENTO: {file.name} ---\n\n"
-                                except Exception as e:
-                                    st.error(f"Erro ao processar o arquivo {file.name}: {e}")
-                        st.session_state.texto_multi_analise = texto_combinado
-                        st.success("Arquivos processados! Você já pode iniciar a conversa abaixo.")
-                        st.rerun()
+            st.info("Use esta seção para fazer upload de vários arquivos e conversar sobre o conteúdo combinado.")
+
+            if st.sidebar.button("‹ Voltar ao Menu"):
+                keys_to_clear = ["texto_multi_analise", "chat_multi_doc", "chat_multi_messages", "upload_multi"]
+                for key in keys_to_clear:
+                    st.session_state.pop(key, None)
+                st.session_state.pagina_atual = "Principal"
+                st.rerun()
+            
+            uploaded_files = st.file_uploader(
+                "Escolha os arquivos (PDF ou TXT)", 
+                type=["pdf", "txt"], 
+                accept_multiple_files=True,
+                key="upload_multi"
+            )
+
+            if uploaded_files:
+                if st.button("Processar Arquivos e Iniciar Chat"):
+                    texto_combinado = ""
+                    with st.spinner("Extraindo texto de todos os arquivos..."):
+                        for file in uploaded_files:
+                            try:
+                                texto_combinado += f"\n\n--- INÍCIO DO DOCUMENTO: {file.name} ---\n\n"
+                                if file.type == "application/pdf":
+                                    texto_bytes = file.read()
+                                    with fitz.open(stream=BytesIO(texto_bytes), filetype="pdf") as doc:
+                                        texto_combinado += "".join(page.get_text() for page in doc)
+                                elif file.type == "text/plain":
+                                    texto_combinado += file.read().decode("utf-8")
+                                texto_combinado += f"\n\n--- FIM DO DOCUMENTO: {file.name} ---\n\n"
+                            except Exception as e:
+                                st.error(f"Erro ao processar o arquivo {file.name}: {e}")
+                    
+                    st.session_state.texto_multi_analise = texto_combinado
+                    # Limpa o chat anterior se novos arquivos forem processados
+                    st.session_state.pop("chat_multi_doc", None)
+                    st.session_state.pop("chat_multi_messages", None)
+                    st.success("Arquivos processados! Você já pode iniciar a conversa abaixo.")
+            
             if "texto_multi_analise" in st.session_state:
-                if st.sidebar.button("‹ Voltar para o Início"):
-                    keys_to_clear_multi = ["texto_multi_analise", "chat_multi_doc", "chat_multi_messages"]
-                    for key in keys_to_clear_multi:
-                        st.session_state.pop(key, None)
-                    st.session_state.current_page = "Página Inicial"
-                    st.rerun()
                 if "chat_multi_doc" not in st.session_state:
-                    prompt_inicial_chat = f"Você é um especialista que analisou múltiplos documentos..."
-                    model = genai.GenerativeModel(ai_model, system_instruction=prompt_inicial_chat)
-                    st.session_state.chat_multi_doc = model.start_chat(history=[])
-                    st.session_state.chat_multi_messages = []
+                    # 1. A instrução do sistema agora é simples e focada no comportamento.
+                    instrucao_sistema = "Você é um assistente de IA especialista em analisar e responder perguntas sobre os documentos fornecidos pelo usuário. Responda de forma concisa e baseie-se exclusivamente no texto."
+                    model = genai.GenerativeModel(ai_model, system_instruction=instrucao_sistema)
+                    
+                    # 2. O conteúdo dos documentos é a primeira mensagem da conversa.
+                    prompt_inicial = f"Por favor, analise o conteúdo combinado dos seguintes documentos para responder às minhas perguntas:\n\n{st.session_state.texto_multi_analise}"
+                    
+                    # 3. Iniciamos o chat já com o histórico contendo os documentos.
+                    st.session_state.chat_multi_doc = model.start_chat(history=[
+                        {'role': 'user', 'parts': [prompt_inicial]},
+                        {'role': 'model', 'parts': ["Entendido. Os documentos foram processados e estou pronto para responder às suas perguntas com base neles. Pode começar."]}
+                    ])
+                    st.session_state.chat_multi_messages = st.session_state.chat_multi_doc.history
+
                 st.subheader("Converse com seus Documentos")
-                for msg in st.session_state.get("chat_multi_messages", []):
-                    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+                # Exibe as mensagens, pulando a primeira (que é o prompt gigante com os documentos)
+                for msg in st.session_state.get("chat_multi_messages", [])[1:]:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                
                 if prompt := st.chat_input("Faça uma pergunta sobre o conteúdo combinado..."):
                     st.session_state.chat_multi_messages.append({"role": "user", "content": prompt})
                     with st.spinner("Analisando sua pergunta..."):
@@ -289,6 +313,7 @@ else:
                         except Exception as e:
                             st.error(f"Erro ao comunicar com a IA: {e}")
                     st.rerun()
+            
         
         # --- FUNÇÃO MODIFICADA ---
         def pagina_suas_notas():
