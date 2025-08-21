@@ -283,6 +283,7 @@ else:
                     st.success("Arquivos processados! Você já pode iniciar a conversa abaixo.")
             
             if "texto_multi_analise" in st.session_state:
+                # --- INÍCIO DA ALTERAÇÃO PRINCIPAL ---
                 if "chat_multi_doc" not in st.session_state:
                     # 1. A instrução do sistema agora é simples e focada no comportamento.
                     instrucao_sistema = "Você é um assistente de IA especialista em analisar e responder perguntas sobre os documentos fornecidos pelo usuário. Responda de forma concisa e baseie-se exclusivamente no texto."
@@ -293,10 +294,16 @@ else:
                     
                     # 3. Iniciamos o chat já com o histórico contendo os documentos.
                     st.session_state.chat_multi_doc = model.start_chat(history=[
+
                         {'role': 'user', 'parts': [prompt_inicial]},
                         {'role': 'model', 'parts': ["Entendido. Os documentos foram processados e estou pronto para responder às suas perguntas com base neles. Pode começar."]}
                     ])
-                    st.session_state.chat_multi_messages = st.session_state.chat_multi_doc.history
+            
+                    # A lista de mensagens agora é uma cópia manual no formato de dicionário.
+                    st.session_state.chat_multi_messages = [
+                        {"role": "user", "content": prompt_inicial},
+                        {"role": "assistant", "content": "Entendido. Os documentos foram processados e estou pronto para responder às suas perguntas com base neles. Pode começar."}
+                    ]
 
                 st.subheader("Converse com seus Documentos")
                 # Exibe as mensagens, pulando a primeira (que é o prompt gigante com os documentos)
